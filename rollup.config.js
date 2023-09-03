@@ -1,6 +1,7 @@
 const path = require("path");
 const json = require("@rollup/plugin-json");
-const resolvePlugin = require("@rollup/plugin-node-resolve");
+const resolvePlugin = require("@rollup/plugin-node-resolve").default; // make sure to call .default
+const commonjs = require("@rollup/plugin-commonjs"); // Add this line
 const ts = require("rollup-plugin-typescript2");
 const cleanup = require("rollup-plugin-cleanup");
 const terser = require("rollup-plugin-terser");
@@ -20,6 +21,9 @@ const outputConfig = {
   global: {
     file: resolve(`dist/${name}.global.js`),
     format: "iife",
+    globals: {
+      'uzip': 'uzip' // Define the global variable name for 'uzip'
+    }
   },
 };
 
@@ -35,7 +39,8 @@ const createConfig = (format, output) => {
       ts({
         tsconfig: resolve(__dirname, "tsconfig.json"),
       }),
-      resolvePlugin,
+      resolvePlugin(),
+      commonjs(),
       cleanup(),
       terser.terser(),
     ],

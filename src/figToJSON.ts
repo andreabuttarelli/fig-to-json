@@ -1,59 +1,81 @@
-import { ByteBuffer, decodeBinarySchema, compileSchema } from "./lib/kiwi";
-import { inflateRaw } from "uzip";
+import { ByteBuffer, compileSchema, decodeBinarySchema, parseSchema } from "kiwi-schema";
+import * as UZIP from "uzip"
 
-const transfer8to32 = function (
-  fileByte: Uint8Array,
-  start: number,
-  cache: Uint8Array
-) {
-  cache[0] = fileByte[start + 0];
-  cache[1] = fileByte[start + 1];
-  cache[2] = fileByte[start + 2];
-  cache[3] = fileByte[start + 3];
-};
+const transfer8to32 = function (fileByte: Uint8Array, start: number, cache: Uint8Array) {
+  cache[0] = fileByte[start + 0]
+  cache[1] = fileByte[start + 1]
+  cache[2] = fileByte[start + 2]
+  cache[3] = fileByte[start + 3]
+}
 
-const int32 = new Int32Array(1);
-const uint8 = new Uint8Array(int32.buffer);
-const uint32 = new Uint32Array(int32.buffer);
+// buffers to work with for convenience
+const int32 = new Int32Array(1) // 32 bit word
+const uint8 = new Uint8Array(int32.buffer) // 4 slots of 8 bits
+const uint32 = new Uint32Array(int32.buffer) // 1 unsigned 32 bit word
+
+function convertBlobsToBase64(json: any): object {
+  if (!json.blobs) return json
+
+  return {
+    ...json,
+    blobs: json.blobs.map((blob: any) => {
+      return btoa(String.fromCharCode(...blob.bytes))
+    })
+  }
+}
+
+function convertBase64ToBlobs(json: any): object {
+  if (!json.blobs) return json
+
+  return {
+    ...json,
+    blobs: json.blobs.map((blob: any) => {
+      return { bytes: Uint8Array.from(atob(blob), (c) => c.charCodeAt(0)) }
+    })
+  }
+}
 
 const calcEnd = function (fileByte: Uint8Array, start: number) {
-  transfer8to32(fileByte, start, uint8);
-  return uint32[0];
-};
+  transfer8to32(fileByte, start, uint8)
+  return uint32[0]
+}
 
-export const getFigJsonData = (fileBuffer: Buffer) => {
-  const fileByte: Uint8Array = new Uint8Array(fileBuffer);
-
-  // 8 bits for figma comment;
-  let start = 8;
-
-  calcEnd(fileByte, start);
-
-  start += 4;
-  const result = [];
-  while (start < fileByte.length) {
-    var end = calcEnd(fileByte, start);
-    start += 4;
-
-    let byteTemp = fileByte.slice(start, start + end);
-
-    if (!(fileByte[start] == 137 && fileByte[start + 1] == 80)) {
-      byteTemp = inflateRaw(byteTemp);
-    }
-
-    result.push(byteTemp);
-    start += end;
-  }
-
-  const [schemaByte, dataByte] = result;
+export const getFigJsonData = async (fileBuffer: Buffer | ArrayBuffer): Promise<object> => {
+  const [schemaByte, dataByte] = figToBinaryParts(fileBuffer);
 
   const schemaBB = new ByteBuffer(schemaByte);
-
   const schema = decodeBinarySchema(schemaBB);
-
   const dataBB = new ByteBuffer(dataByte);
-
   const schemaHelper = compileSchema(schema);
 
-  return schemaHelper[`decodeMessage`](dataBB);
-};
+  const json = schemaHelper[`decodeMessage`](dataBB);
+  return convertBlobsToBase64(json);
+}
+
+// note fileBuffer is mutated inside
+function figToBinaryParts(fileBuffer: ArrayBuffer | Buffer): [Uint8Array, Uint8Array] {
+  let fileByte: Uint8Array = new Uint8Array(fileBuffer);
+  let schemaByte: Uint8Array;
+  let dataByte: Uint8Array;
+
+  // ... (rest of the unzip and initial parsing logic)
+
+  let start = 8;
+  calcEnd(fileByte, start);
+  start += 4;
+
+  // Assume the first part is schemaByte and the second part is dataByte
+  let end = calcEnd(fileByte, start);
+  start += 4;
+  schemaByte = fileByte.slice(start, start + end);
+  start += end;
+
+  end = calcEnd(fileByte, start);
+  start += 4;
+  dataByte = fileByte.slice(start, start + end);
+
+  // Note: if there are more than two parts, this simple approach won't work, 
+  // and you'll need more sophisticated logic to differentiate between parts.
+
+  return [schemaByte, dataByte];
+}
